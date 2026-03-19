@@ -276,14 +276,17 @@ function GamePage() {
         setGameState(prevState)
         setError(result.error)
         setTimeout(() => setError(null), 3000)
+        optimisticRef.current--
+      } else {
+        // Success — keep optimistic guard up for a full poll cycle so the
+        // poll doesn't overwrite our client-generated cubes with different
+        // server-generated ones (both are random, causing a visual double-reset).
+        setTimeout(() => optimisticRef.current--, 1000)
       }
-      // No fresh fetch — optimistic state is good enough.
-      // The poll will sync authoritative state on the next cycle.
     } catch {
       setGameState(prevState)
       setError('Network error')
       setTimeout(() => setError(null), 3000)
-    } finally {
       optimisticRef.current--
     }
   }
