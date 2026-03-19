@@ -255,8 +255,11 @@ function GamePage() {
     const nextState = structuredClone(gameState)
     nextState.consecutiveSkips++
 
-    if (nextState.consecutiveSkips >= nextState.players.length) {
-      nextState.availableCubes = generateCubes(5)
+    const willRefreshCubes =
+      nextState.consecutiveSkips >= nextState.players.length
+    if (willRefreshCubes) {
+      // Don't generate cubes optimistically — the server response will
+      // provide the authoritative set so we avoid a double-refresh.
       nextState.consecutiveSkips = 0
     }
 
