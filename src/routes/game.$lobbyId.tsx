@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import confetti from 'canvas-confetti'
 import type { GameState } from '#/lib/game-types'
+import { generateCubes } from '#/lib/game-logic'
 import {
   getGameStateFn,
   setReadyFn,
@@ -23,14 +24,16 @@ export const Route = createFileRoute('/game/$lobbyId')({
     pid: (search.pid as string) || '',
     pid2: (search.pid2 as string) || '',
     split: (search.split as string) || '',
+    single: (search.single as string) || '',
   }),
   component: GamePage,
 })
 
 function GamePage() {
   const { lobbyId } = Route.useParams()
-  const { pid, pid2, split } = Route.useSearch()
+  const { pid, pid2, split, single } = Route.useSearch()
   const isSplitScreen = split === 'true' && !!pid2
+  const isSinglePlayer = single === 'true'
   const navigate = useNavigate()
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [selectedCubeIndex, setSelectedCubeIndex] = useState<number | null>(
@@ -38,9 +41,10 @@ function GamePage() {
   )
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [acting, setActing] = useState(false)
   const [viewingBoard, setViewingBoard] = useState(0) // 0 = my board, 1 = opponent
   const finishedRef = useRef(false)
+  // Track in-flight optimistic updates so polls don't overwrite them
+  const optimisticRef = useRef(0)
 
   // In split-screen, auto-switch to the active player's board after each turn
   useEffect(() => {
@@ -96,11 +100,13 @@ function GamePage() {
 
     const poll = async () => {
       if (finishedRef.current) return
+      // Skip poll if we have an optimistic update in flight
+      if (optimisticRef.current > 0) return
       try {
         const result = await getGameStateFn({
           data: { lobbyId, playerId: pid },
         })
-        if (!active) return
+        if (!active || optimisticRef.current > 0) return
         if ('error' in result) {
           setError(result.error)
         } else {
@@ -170,8 +176,38 @@ function GamePage() {
       : null
 
   const handleCellClick = async (row: number, col: number) => {
-    if (selectedCubeIndex === null || !isMyTurn || acting) return
-    setActing(true)
+    if (selectedCubeIndex === null || !isMyTurn || !gameState) return
+
+    const prevState = gameState
+    const cube = gameState.availableCubes[selectedCubeIndex]
+    if (!cube) return
+
+    // Build optimistic state
+    const nextState = structuredClone(gameState)
+    const currentPlayer = nextState.players[nextState.currentPlayerIndex]
+    currentPlayer.board[row][col].cube = cube
+    currentPlayer.placedCount++
+    nextState.availableCubes.splice(selectedCubeIndex, 1)
+    nextState.consecutiveSkips = 0
+
+    const totalCells = nextState.boardSize * nextState.boardSize
+    if (currentPlayer.placedCount === totalCells) {
+      nextState.status = 'finished'
+      nextState.winner = currentPlayer.id
+    } else {
+      if (nextState.availableCubes.length === 0) {
+        nextState.availableCubes = generateCubes(5)
+      }
+      nextState.currentPlayerIndex =
+        (nextState.currentPlayerIndex + 1) % nextState.players.length
+    }
+
+    // Apply optimistically
+    setGameState(nextState)
+    setSelectedCubeIndex(null)
+    optimisticRef.current++
+
+    // Fire server call in background
     try {
       const result = await placeCubeFn({
         data: {
@@ -183,49 +219,75 @@ function GamePage() {
         },
       })
       if (result.error) {
+        // Rollback
+        setGameState(prevState)
         setError(result.error)
         setTimeout(() => setError(null), 3000)
       } else {
-        setSelectedCubeIndex(null)
+        // Fetch authoritative state (corrects any differences like random cubes)
         const fresh = await getGameStateFn({
           data: { lobbyId, playerId: pid },
         })
         if (!('error' in fresh)) setGameState(fresh as GameState)
       }
+    } catch {
+      setGameState(prevState)
+      setError('Network error')
+      setTimeout(() => setError(null), 3000)
     } finally {
-      setActing(false)
+      optimisticRef.current--
     }
   }
 
   const handleReady = async () => {
-    setActing(true)
-    try {
-      const result = await setReadyFn({
-        data: { lobbyId, playerId: pid },
-      })
-      if (result.error) setError(result.error)
-    } finally {
-      setActing(false)
-    }
+    const result = await setReadyFn({
+      data: { lobbyId, playerId: pid },
+    })
+    if (result.error) setError(result.error)
   }
 
   const handleSkip = async () => {
-    setActing(true)
+    if (!gameState) return
+
+    const prevState = gameState
+
+    // Build optimistic state
+    const nextState = structuredClone(gameState)
+    nextState.consecutiveSkips++
+
+    if (nextState.consecutiveSkips >= nextState.players.length) {
+      nextState.availableCubes = generateCubes(5)
+      nextState.consecutiveSkips = 0
+    }
+
+    nextState.currentPlayerIndex =
+      (nextState.currentPlayerIndex + 1) % nextState.players.length
+
+    // Apply optimistically
+    setGameState(nextState)
+    setSelectedCubeIndex(null)
+    optimisticRef.current++
+
     try {
       const result = await skipTurnFn({
         data: { lobbyId, playerId: activePlayerId },
       })
       if (result.error) {
+        setGameState(prevState)
         setError(result.error)
+        setTimeout(() => setError(null), 3000)
       } else {
-        setSelectedCubeIndex(null)
         const fresh = await getGameStateFn({
           data: { lobbyId, playerId: pid },
         })
         if (!('error' in fresh)) setGameState(fresh as GameState)
       }
+    } catch {
+      setGameState(prevState)
+      setError('Network error')
+      setTimeout(() => setError(null), 3000)
     } finally {
-      setActing(false)
+      optimisticRef.current--
     }
   }
 
@@ -382,7 +444,12 @@ function GamePage() {
             >
               Mozaika Game
             </button>
-            {gameState.players.length === 2 && (() => {
+            {isSinglePlayer && gameState.players.length === 1 ? (
+              <span className="font-mono text-xs text-foreground font-bold">
+                {gameState.players[0].placedCount}
+                <span className="text-muted-foreground">/{gameState.boardSize * gameState.boardSize}</span>
+              </span>
+            ) : gameState.players.length === 2 ? (() => {
               const p1 = gameState.players.find((p) =>
                 isSplitScreen ? p.id === gameState.players[0].id : p.id === pid,
               )!
@@ -400,7 +467,7 @@ function GamePage() {
                   </span>
                 </div>
               )
-            })()}
+            })() : null}
           </div>
 
           {gameState.status === 'playing' && (
@@ -412,8 +479,8 @@ function GamePage() {
                   : 'bg-secondary text-muted-foreground',
               )}
             >
-              {acting
-                ? 'Placing...'
+              {isSinglePlayer
+                ? 'Your Turn'
                 : isSplitScreen
                   ? `${currentPlayerName}'s Turn`
                   : isMyTurn
@@ -427,24 +494,28 @@ function GamePage() {
               <div
                 className={cn(
                   'rounded-lg py-3 text-center text-lg font-bold',
-                  gameState.status === 'abandoned'
-                    ? gameState.winner === pid ||
-                      gameState.winner === pid2
-                      ? 'bg-green-600/20 text-green-500'
-                      : 'bg-destructive/10 text-destructive'
-                    : gameState.winner === pid ||
+                  isSinglePlayer
+                    ? 'bg-green-600/20 text-green-500'
+                    : gameState.status === 'abandoned'
+                      ? gameState.winner === pid ||
                         gameState.winner === pid2
-                      ? 'bg-green-600/20 text-green-500'
-                      : 'bg-destructive/10 text-destructive',
+                        ? 'bg-green-600/20 text-green-500'
+                        : 'bg-destructive/10 text-destructive'
+                      : gameState.winner === pid ||
+                          gameState.winner === pid2
+                        ? 'bg-green-600/20 text-green-500'
+                        : 'bg-destructive/10 text-destructive',
                 )}
               >
                 {gameState.status === 'abandoned'
                   ? 'Opponent left — You Win!'
-                  : isSplitScreen
-                    ? `${winnerName} Wins!`
-                    : gameState.winner === pid
-                      ? 'You Won!'
-                      : `${winnerName} Won!`}
+                  : isSinglePlayer
+                    ? 'Board Complete!'
+                    : isSplitScreen
+                      ? `${winnerName} Wins!`
+                      : gameState.winner === pid
+                        ? 'You Won!'
+                        : `${winnerName} Won!`}
               </div>
             </div>
           )}
@@ -478,39 +549,40 @@ function GamePage() {
                 {/* Board with tall side arrows */}
                 <div className="flex items-stretch gap-1">
                   {/* Left arrow */}
-                  <button
-                    onClick={() => setViewingBoard(0)}
-                    disabled={viewingBoard === 0}
-                    className={cn(
-                      'flex w-7 shrink-0 items-center justify-center rounded-lg border transition',
-                      viewingBoard === 0
-                        ? 'border-border/50 text-muted-foreground/20'
-                        : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
-                    )}
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                  </button>
+                  {boards.length > 1 && (
+                    <button
+                      onClick={() => setViewingBoard(0)}
+                      disabled={viewingBoard === 0}
+                      className={cn(
+                        'flex w-7 shrink-0 items-center justify-center rounded-lg border transition',
+                        viewingBoard === 0
+                          ? 'border-border/50 text-muted-foreground/20'
+                          : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
+                      )}
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                  )}
 
                   {/* Sliding boards container */}
                   <div className="relative min-w-0 flex-1 overflow-hidden">
-                    {acting && (
-                      <div className="absolute -inset-2 z-10 flex items-center justify-center rounded-xl bg-background/60 backdrop-blur-[2px]">
-                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
-                      </div>
-                    )}
                     <div
                       className="flex transition-transform duration-300 ease-in-out"
                       style={{ transform: `translateX(-${viewingBoard * 100}%)` }}
                     >
                       {boards.map((player) => {
-                        const isBoardMine = isSplitScreen
-                          ? player!.id === activePlayerId
-                          : player!.id === pid
-                        const label = isBoardMine
-                          ? isSplitScreen
-                            ? player!.name
-                            : 'Your Board'
-                          : player!.name
+                        const isBoardMine = isSinglePlayer
+                          ? true
+                          : isSplitScreen
+                            ? player!.id === activePlayerId
+                            : player!.id === pid
+                        const label = isSinglePlayer
+                          ? player!.name
+                          : isBoardMine
+                            ? isSplitScreen
+                              ? player!.name
+                              : 'Your Board'
+                            : player!.name
                         return (
                           <div
                             key={player!.id}
@@ -549,18 +621,20 @@ function GamePage() {
                   </div>
 
                   {/* Right arrow */}
-                  <button
-                    onClick={() => setViewingBoard(1)}
-                    disabled={viewingBoard === 1 || boards.length < 2}
-                    className={cn(
-                      'flex w-7 shrink-0 items-center justify-center rounded-lg border transition',
-                      viewingBoard === 1 || boards.length < 2
-                        ? 'border-border/50 text-muted-foreground/20'
-                        : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
-                    )}
-                  >
-                    <ChevronRight className="h-5 w-5" />
-                  </button>
+                  {boards.length > 1 && (
+                    <button
+                      onClick={() => setViewingBoard(1)}
+                      disabled={viewingBoard === 1}
+                      className={cn(
+                        'flex w-7 shrink-0 items-center justify-center rounded-lg border transition',
+                        viewingBoard === 1
+                          ? 'border-border/50 text-muted-foreground/20'
+                          : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
+                      )}
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Dots indicator */}
@@ -602,8 +676,7 @@ function GamePage() {
                 {isMyTurn && (
                   <button
                     onClick={handleSkip}
-                    disabled={acting}
-                    className="rounded-md border border-red-600/40 px-2 py-0.5 text-[10px] font-medium text-red-500 transition hover:bg-red-600/10 hover:text-red-400 disabled:opacity-50"
+                    className="rounded-md border border-red-600/40 px-2 py-0.5 text-[10px] font-medium text-red-500 transition hover:bg-red-600/10 hover:text-red-400"
                   >
                     Skip
                   </button>
@@ -612,8 +685,8 @@ function GamePage() {
               <CubePool
                 cubes={gameState.availableCubes}
                 selectedIndex={selectedCubeIndex}
-                onSelect={isMyTurn && !acting ? setSelectedCubeIndex : () => {}}
-                disabled={!isMyTurn || acting}
+                onSelect={isMyTurn ? setSelectedCubeIndex : () => {}}
+                disabled={!isMyTurn}
               />
             </div>
           </div>

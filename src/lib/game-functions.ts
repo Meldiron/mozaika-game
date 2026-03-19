@@ -9,6 +9,7 @@ import {
   kickPlayer,
   leaveGame,
   createSplitScreen,
+  createSinglePlayer,
   getGameState,
 } from './game-state'
 
@@ -90,6 +91,18 @@ export const createSplitScreenFn = createServerFn({ method: 'POST' })
     return await createSplitScreen(
       data.player1Name,
       data.player2Name,
+      data.boardSize,
+      data.ruleCount,
+    )
+  })
+
+export const createSinglePlayerFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    (d: { playerName: string; boardSize: BoardSize; ruleCount: number }) => d,
+  )
+  .handler(async ({ data }) => {
+    return await createSinglePlayer(
+      data.playerName,
       data.boardSize,
       data.ruleCount,
     )

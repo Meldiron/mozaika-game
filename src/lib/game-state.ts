@@ -192,7 +192,7 @@ export async function placeCube(
     game.availableCubes = generateCubes(5)
   }
 
-  game.currentPlayerIndex = (game.currentPlayerIndex + 1) % 2
+  game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length
   await saveGame(game)
   return {}
 }
@@ -210,12 +210,12 @@ export async function skipTurn(
 
   game.consecutiveSkips++
 
-  if (game.consecutiveSkips >= 2) {
+  if (game.consecutiveSkips >= game.players.length) {
     game.availableCubes = generateCubes(5)
     game.consecutiveSkips = 0
   }
 
-  game.currentPlayerIndex = (game.currentPlayerIndex + 1) % 2
+  game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length
   await saveGame(game)
   return {}
 }
@@ -257,6 +257,11 @@ export async function leaveGame(
     }
     await saveGame(game)
   } else if (game.status === 'playing') {
+    if (game.players.length === 1) {
+      // Single player — just remove the game
+      await removeGame(lobbyId)
+      return {}
+    }
     game.status = 'abandoned'
     const remaining = game.players.find((p) => p.id !== playerId)
     game.winner = remaining?.id ?? null
@@ -306,6 +311,39 @@ export async function createSplitScreen(
 
   await saveGame(game)
   return { lobbyId, player1Id, player2Id }
+}
+
+export async function createSinglePlayer(
+  playerName: string,
+  boardSize: BoardSize,
+  ruleCount: number,
+): Promise<{ lobbyId: string; playerId: string }> {
+  const lobbyId = generateLobbyId()
+  const playerId = generatePlayerId()
+
+  const game: GameState = {
+    lobbyId,
+    hostId: playerId,
+    status: 'playing',
+    boardSize,
+    ruleCount,
+    players: [
+      {
+        id: playerId,
+        name: playerName,
+        board: generateBoard(boardSize, ruleCount),
+        ready: true,
+        placedCount: 0,
+      },
+    ],
+    availableCubes: generateCubes(5),
+    currentPlayerIndex: 0,
+    winner: null,
+    consecutiveSkips: 0,
+  }
+
+  await saveGame(game)
+  return { lobbyId, playerId }
 }
 
 export async function getGameState(
