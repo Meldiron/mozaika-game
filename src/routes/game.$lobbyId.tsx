@@ -255,11 +255,8 @@ function GamePage() {
     const nextState = structuredClone(gameState)
     nextState.consecutiveSkips++
 
-    const willRefreshCubes =
-      nextState.consecutiveSkips >= nextState.players.length
-    if (willRefreshCubes) {
-      // Don't generate cubes optimistically — the server response will
-      // provide the authoritative set so we avoid a double-refresh.
+    if (nextState.consecutiveSkips >= nextState.players.length) {
+      nextState.availableCubes = generateCubes(5)
       nextState.consecutiveSkips = 0
     }
 
@@ -279,12 +276,9 @@ function GamePage() {
         setGameState(prevState)
         setError(result.error)
         setTimeout(() => setError(null), 3000)
-      } else {
-        const fresh = await getGameStateFn({
-          data: { lobbyId, playerId: pid },
-        })
-        if (!('error' in fresh)) setGameState(fresh as GameState)
       }
+      // No fresh fetch — optimistic state is good enough.
+      // The poll will sync authoritative state on the next cycle.
     } catch {
       setGameState(prevState)
       setError('Network error')
