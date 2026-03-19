@@ -228,9 +228,9 @@ function TutorialSlider() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-base font-bold">Sample game: 3x3, 6 rules</h3>
+      <h3 className="text-base font-bold">Example playthrough</h3>
       <p className="text-sm text-neutral-400">
-        Step through each move. The corner label shows the cell's rule.
+        Step by step example game in 3x3 grid game.
       </p>
       <div className="flex justify-center">
         <div className={`rounded-xl ring-2 ${step === 0 ? 'ring-white/50 animate-pulse' : 'ring-transparent'}`}>
