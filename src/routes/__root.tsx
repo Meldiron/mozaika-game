@@ -7,7 +7,7 @@ import appCss from '../styles.css?url'
 const SITE_TITLE = 'Mozaika Game'
 const SITE_DESCRIPTION =
   'A strategic dice-placement duel. Place colored dice on your board, follow the rules, and outsmart your opponent in real-time or split-screen.'
-const SITE_URL = 'https://mozaika.game'
+const SITE_URL = 'https://mozaika-game.vercel.app'
 
 export const Route = createRootRoute({
   head: () => ({
