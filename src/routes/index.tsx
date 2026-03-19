@@ -1,87 +1,386 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
+import type { BoardSize } from '#/lib/game-types'
+import { SIZE_RULES } from '#/lib/game-types'
+import {
+  createLobbyFn,
+  joinLobbyFn,
+  createSplitScreenFn,
+} from '#/lib/game-functions'
+import { Button } from '#/components/ui/button'
+import { Input } from '#/components/ui/input'
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+  InputOTPSeparator,
+} from '#/components/ui/input-otp'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '#/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '#/components/ui/select'
 
-export const Route = createFileRoute('/')({ component: App })
+export const Route = createFileRoute('/')({ component: Home })
 
-function App() {
+type View = 'menu' | 'create' | 'join' | 'split'
+
+function defaultRuleCount(size: BoardSize): number {
+  return SIZE_RULES[size].find((r) => r > 0) ?? SIZE_RULES[size][0]
+}
+
+function SizeAndRulesSelect({
+  boardSize,
+  ruleCount,
+  onSizeChange,
+  onRuleCountChange,
+}: {
+  boardSize: BoardSize
+  ruleCount: number
+  onSizeChange: (size: BoardSize) => void
+  onRuleCountChange: (count: number) => void
+}) {
+  const availableRules = SIZE_RULES[boardSize]
+
   return (
-    <main className="page-wrap px-4 pb-8 pt-14">
-      <section className="island-shell rise-in relative overflow-hidden rounded-[2rem] px-6 py-10 sm:px-10 sm:py-14">
-        <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(79,184,178,0.32),transparent_66%)]" />
-        <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(47,106,74,0.18),transparent_66%)]" />
-        <p className="island-kicker mb-3">TanStack Start Base Template</p>
-        <h1 className="display-title mb-5 max-w-3xl text-4xl leading-[1.02] font-bold tracking-tight text-[var(--sea-ink)] sm:text-6xl">
-          Start simple, ship quickly.
-        </h1>
-        <p className="mb-8 max-w-2xl text-base text-[var(--sea-ink-soft)] sm:text-lg">
-          This base starter intentionally keeps things light: two routes, clean
-          structure, and the essentials you need to build from scratch.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <a
-            href="/about"
-            className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-[var(--lagoon-deep)] no-underline transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)]"
-          >
-            About This Starter
-          </a>
-          <a
-            href="https://tanstack.com/router"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full border border-[rgba(23,58,64,0.2)] bg-white/50 px-5 py-2.5 text-sm font-semibold text-[var(--sea-ink)] no-underline transition hover:-translate-y-0.5 hover:border-[rgba(23,58,64,0.35)]"
-          >
-            Router Guide
-          </a>
+    <div className="flex gap-2">
+      <Select
+        value={String(boardSize)}
+        onValueChange={(v) => {
+          const newSize = Number(v) as BoardSize
+          onSizeChange(newSize)
+          // Reset rule count to first available for new size
+          onRuleCountChange(defaultRuleCount(newSize))
+        }}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="3">3 x 3</SelectItem>
+          <SelectItem value="4">4 x 4</SelectItem>
+          <SelectItem value="5">5 x 5</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        key={boardSize}
+        value={String(ruleCount)}
+        onValueChange={(v) => onRuleCountChange(Number(v))}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {availableRules.map((r) => (
+            <SelectItem key={r} value={String(r)}>
+              {r === 0 ? 'No rules' : `${r} rules`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+function Home() {
+  const navigate = useNavigate()
+  const [view, setView] = useState<View>('menu')
+  const [createName, setCreateName] = useState('')
+  const [boardSize, setBoardSize] = useState<BoardSize>(5)
+  const [ruleCount, setRuleCount] = useState(() => defaultRuleCount(5))
+  const [joinName, setJoinName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [splitName1, setSplitName1] = useState('')
+  const [splitName2, setSplitName2] = useState('')
+  const [splitBoardSize, setSplitBoardSize] = useState<BoardSize>(5)
+  const [splitRuleCount, setSplitRuleCount] = useState(() => defaultRuleCount(5))
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!createName.trim() || loading) return
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await createLobbyFn({
+        data: { playerName: createName.trim(), boardSize, ruleCount },
+      })
+      await navigate({
+        to: '/game/$lobbyId',
+        params: { lobbyId: result.lobbyId },
+        search: { pid: result.playerId },
+      })
+    } catch {
+      setError('Failed to create lobby')
+    }
+    setLoading(false)
+  }
+
+  const handleJoin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!joinName.trim() || !joinCode.trim() || loading) return
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await joinLobbyFn({
+        data: {
+          playerName: joinName.trim(),
+          lobbyId: joinCode.trim(),
+        },
+      })
+      if ('error' in result) {
+        setError(result.error)
+      } else {
+        await navigate({
+          to: '/game/$lobbyId',
+          params: { lobbyId: joinCode.trim() },
+          search: { pid: result.playerId },
+        })
+      }
+    } catch {
+      setError('Failed to join lobby')
+    }
+    setLoading(false)
+  }
+
+  const handleSplit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!splitName1.trim() || !splitName2.trim() || loading) return
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await createSplitScreenFn({
+        data: {
+          player1Name: splitName1.trim(),
+          player2Name: splitName2.trim(),
+          boardSize: splitBoardSize,
+          ruleCount: splitRuleCount,
+        },
+      })
+      await navigate({
+        to: '/game/$lobbyId',
+        params: { lobbyId: result.lobbyId },
+        search: {
+          pid: result.player1Id,
+          pid2: result.player2Id,
+          split: 'true',
+        },
+      })
+    } catch {
+      setError('Failed to create game')
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="border-b">
+        <div className="mx-auto flex h-14 w-full max-w-sm items-center px-4">
+          <h1 className="text-lg font-bold tracking-tight">Mozaika Game</h1>
         </div>
-      </section>
+      </header>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          [
-            'Type-Safe Routing',
-            'Routes and links stay in sync across every page.',
-          ],
-          [
-            'Server Functions',
-            'Call server code from your UI without creating API boilerplate.',
-          ],
-          [
-            'Streaming by Default',
-            'Ship progressively rendered responses for faster experiences.',
-          ],
-          [
-            'Tailwind Native',
-            'Design quickly with utility-first styling and reusable tokens.',
-          ],
-        ].map(([title, desc], index) => (
-          <article
-            key={title}
-            className="island-shell feature-card rise-in rounded-2xl p-5"
-            style={{ animationDelay: `${index * 90 + 80}ms` }}
-          >
-            <h2 className="mb-2 text-base font-semibold text-[var(--sea-ink)]">
-              {title}
-            </h2>
-            <p className="m-0 text-sm text-[var(--sea-ink-soft)]">{desc}</p>
-          </article>
-        ))}
-      </section>
+      {/* Body */}
+      <div className="mx-auto w-full max-w-sm space-y-5 px-4 pt-8">
+        {error && (
+          <p className="rounded-lg bg-destructive/10 py-2 text-center text-sm text-destructive">
+            {error}
+          </p>
+        )}
 
-      <section className="island-shell mt-8 rounded-2xl p-6">
-        <p className="island-kicker mb-2">Quick Start</p>
-        <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-[var(--sea-ink-soft)]">
-          <li>
-            Edit <code>src/routes/index.tsx</code> to customize the home page.
-          </li>
-          <li>
-            Update <code>src/components/Header.tsx</code> and{' '}
-            <code>src/components/Footer.tsx</code> for brand links.
-          </li>
-          <li>
-            Add routes in <code>src/routes</code> and tweak visual tokens in{' '}
-            <code>src/styles.css</code>.
-          </li>
-        </ul>
-      </section>
-    </main>
+        {view === 'menu' && (
+          <div className="space-y-3">
+            <h2 className="mb-1 text-xl font-bold">Play a friend online</h2>
+            <Button
+              onClick={() => setView('create')}
+              variant="outline"
+              className="h-14 w-full text-lg font-bold"
+            >
+              Create Game
+            </Button>
+            <Button
+              onClick={() => setView('join')}
+              variant="outline"
+              className="h-14 w-full text-lg font-bold"
+            >
+              Join Game
+            </Button>
+            <div className="flex items-center gap-3 py-1">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">Or play on one device</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            <Button
+              onClick={() => setView('split')}
+              variant="outline"
+              className="h-14 w-full text-lg font-bold"
+            >
+              Split Screen
+            </Button>
+          </div>
+        )}
+
+        {view === 'create' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Create Game</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreate} className="space-y-3">
+                <Input
+                  placeholder="Your name"
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                />
+                <SizeAndRulesSelect
+                  boardSize={boardSize}
+                  ruleCount={ruleCount}
+                  onSizeChange={setBoardSize}
+                  onRuleCountChange={setRuleCount}
+                />
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={loading || !createName.trim()}
+                >
+                  Create Lobby
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setView('menu')
+                    setError(null)
+                  }}
+                >
+                  Back
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {view === 'join' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Join Game</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleJoin} className="space-y-4">
+                <div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">Your name</p>
+                  <Input
+                    placeholder="Enter your name"
+                    value={joinName}
+                    onChange={(e) => setJoinName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">Lobby code</p>
+                  <InputOTP
+                    maxLength={6}
+                    value={joinCode}
+                    onChange={setJoinCode}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                  >
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} />
+                      <InputOTPSlot index={1} />
+                      <InputOTPSlot index={2} />
+                    </InputOTPGroup>
+                    <InputOTPSeparator />
+                    <InputOTPGroup>
+                      <InputOTPSlot index={3} />
+                      <InputOTPSlot index={4} />
+                      <InputOTPSlot index={5} />
+                    </InputOTPGroup>
+                  </InputOTP>
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={
+                    loading || !joinName.trim() || !joinCode.trim()
+                  }
+                >
+                  Join Lobby
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setView('menu')
+                    setError(null)
+                  }}
+                >
+                  Back
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {view === 'split' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Split Screen</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSplit} className="space-y-3">
+                <Input
+                  placeholder="Player 1 name"
+                  value={splitName1}
+                  onChange={(e) => setSplitName1(e.target.value)}
+                />
+                <Input
+                  placeholder="Player 2 name"
+                  value={splitName2}
+                  onChange={(e) => setSplitName2(e.target.value)}
+                />
+                <SizeAndRulesSelect
+                  boardSize={splitBoardSize}
+                  ruleCount={splitRuleCount}
+                  onSizeChange={setSplitBoardSize}
+                  onRuleCountChange={setSplitRuleCount}
+                />
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={
+                    loading || !splitName1.trim() || !splitName2.trim()
+                  }
+                >
+                  Start Game
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setView('menu')
+                    setError(null)
+                  }}
+                >
+                  Back
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
   )
 }
