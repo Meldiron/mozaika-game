@@ -255,8 +255,11 @@ function GamePage() {
     const nextState = structuredClone(gameState)
     nextState.consecutiveSkips++
 
+    // Generate cubes once — use for both optimistic UI and server state
+    let newCubes: ReturnType<typeof generateCubes> | undefined
     if (nextState.consecutiveSkips >= nextState.players.length) {
-      nextState.availableCubes = generateCubes(5)
+      newCubes = generateCubes(5)
+      nextState.availableCubes = newCubes
       nextState.consecutiveSkips = 0
     }
 
@@ -270,23 +273,18 @@ function GamePage() {
 
     try {
       const result = await skipTurnFn({
-        data: { lobbyId, playerId: activePlayerId },
+        data: { lobbyId, playerId: activePlayerId, newCubes },
       })
       if (result.error) {
         setGameState(prevState)
         setError(result.error)
         setTimeout(() => setError(null), 3000)
-        optimisticRef.current--
-      } else {
-        // Success — keep optimistic guard up for a full poll cycle so the
-        // poll doesn't overwrite our client-generated cubes with different
-        // server-generated ones (both are random, causing a visual double-reset).
-        setTimeout(() => optimisticRef.current--, 1000)
       }
     } catch {
       setGameState(prevState)
       setError('Network error')
       setTimeout(() => setError(null), 3000)
+    } finally {
       optimisticRef.current--
     }
   }

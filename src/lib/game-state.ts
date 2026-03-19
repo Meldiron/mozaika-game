@@ -200,6 +200,7 @@ export async function placeCube(
 export async function skipTurn(
   lobbyId: string,
   playerId: string,
+  newCubes?: { value: number; color: string }[],
 ): Promise<{ error?: string }> {
   const game = await loadGame(lobbyId)
   if (!game) return { error: 'Lobby not found' }
@@ -211,7 +212,7 @@ export async function skipTurn(
   game.consecutiveSkips++
 
   if (game.consecutiveSkips >= game.players.length) {
-    game.availableCubes = generateCubes(5)
+    game.availableCubes = newCubes?.length ? newCubes as typeof game.availableCubes : generateCubes(5)
     game.consecutiveSkips = 0
   }
 

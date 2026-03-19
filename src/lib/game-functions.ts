@@ -54,9 +54,15 @@ export const placeCubeFn = createServerFn({ method: 'POST' })
   })
 
 export const skipTurnFn = createServerFn({ method: 'POST' })
-  .inputValidator((d: { lobbyId: string; playerId: string }) => d)
+  .inputValidator(
+    (d: {
+      lobbyId: string
+      playerId: string
+      newCubes?: { value: number; color: string }[]
+    }) => d,
+  )
   .handler(async ({ data }) => {
-    return await skipTurn(data.lobbyId, data.playerId)
+    return await skipTurn(data.lobbyId, data.playerId, data.newCubes)
   })
 
 export const kickPlayerFn = createServerFn({ method: 'POST' })
