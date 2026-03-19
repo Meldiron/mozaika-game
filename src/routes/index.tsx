@@ -331,7 +331,7 @@ function HowToPlay() {
         <div className="space-y-1.5">
           <p className="font-semibold text-white">Cell rules</p>
           <p className="text-neutral-400">
-            Some cells show a letter (<span className="text-red-400">R</span>, <span className="text-blue-400">B</span>, <span className="text-emerald-400">G</span>, ...) or a number. You must place a dice matching that color or number.
+            Some cells show a letter (<span className="text-red-400">R</span>, <span className="text-blue-400">B</span>, <span className="text-emerald-400">G</span>, ...) or a number (<span className="text-neutral-200">1</span>, <span className="text-neutral-200">2</span>, <span className="text-neutral-200">3</span>, ...). You must place a dice matching that color or number.
           </p>
         </div>
 
